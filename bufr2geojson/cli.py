@@ -70,13 +70,13 @@ def data():
 @cli_option_verbosity
 def transform(ctx, bufr_file, output_dir, verbosity):
     click.echo(f"Transforming {bufr_file.name} to geojson")
-    result = as_geojson(bufr_file.read())
-    for collection in result:
-        for key, item in collection.items():
-            outfile = f"{output_dir}{os.sep}{key}.json"
-            data = item['geojson']
-            with open(outfile, "w") as fh:
-                fh.write(json.dumps(data, indent=4))
+    result = as_geojson(bufr_file.read(), filename=bufr_file.name)
+    for feature in result:
+        key = feature['geojson']['id']
+        outfile = f"{output_dir}{os.sep}{key}.json"
+        with open(outfile, "w") as fh:
+            fh.write(json.dumps(feature['geojson'], indent=4))
+        click.echo( json.dumps(feature, indent=4))
 
     click.echo("Done")
 

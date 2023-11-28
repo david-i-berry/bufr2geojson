@@ -128,10 +128,10 @@ jsonpath_parsers = dict()
 
 # class to act as parser for BUFR data
 class BUFRParser:
-    def __init__(self, raise_on_error=False):
+    def __init__(self, raise_on_error=False, filename=""):
 
         self.raise_on_error = raise_on_error
-
+        self.filename = filename
         # dict to store qualifiers in force and for accounting
         self.qualifiers = {
             "01": {},  # identification
@@ -600,13 +600,16 @@ class BUFRParser:
         return decoded
 
     def as_geojson(self, bufr_handle: int, id: str,
-                   serialize: bool = False, guess_wsi: bool = False) -> dict:
+                   serialize: bool = False,
+                   guess_wsi: bool = False,
+                   fileid: str = "") -> Iterator[dict]:
         """
         Function to return GeoJSON representation of BUFR message
 
         :param bufr_handle: integer handle for BUFR data (used by eccodes)
         :param id: id to assign to feature collection
         :param serialize: whether to return as JSON string (default is False)
+        :param guess_wsi: flag whether to guess wsi based on TSI and allocation rules
 
         :returns: dictionary containing GeoJSON feature collection
         """
@@ -755,51 +758,111 @@ class BUFRParser:
                 if value is not None:
                     # self.get_identification()
                     metadata = self.get_qualifiers()
-                    metadata_hash = hashlib.md5(json.dumps(metadata).encode("utf-8")).hexdigest()  # noqa
-                    md = {
-                        "id": metadata_hash,
-                        "metadata": list()
-                    }
-                    for idx in range(len(metadata)):
-                        md["metadata"].append(metadata[idx])
+                    #metadata_hash = hashlib.md5(json.dumps(metadata).encode("utf-8")).hexdigest()  # noqa
+                    #md = {
+                    #    "id": metadata_hash,
+                    #    "metadata": list()
+                    #}
+                    #for idx in range(len(metadata)):
+                    #    md["metadata"].append(metadata[idx])
+
+
+                    # agent
+                    # role
+                    # process
+                    # date
+                    # comment
+                    # derivedFrom
+                    # status
+                    # version
+                    # reportType
+                    # reportIdentifier
+
+
+                    # we want to convert to a dict
+                    parameter = {}
+                    for item in metadata:
+                        if item['name'] in parameter:
+                            LOGGER.warning("Duplicate named parameter found")
+                        parameter[item['name']] = {
+                            "value": item["value"],
+                            "units": item["units"],
+                            "description": item["description"],
+                        }
+
+                    parameter['derivedFrom'] = [
+                        {
+                            "source": self.filename,
+                            "sourceIdentifier": [f"{id}-{index}"],
+                            "description": "Input BUFR file (source) and bulletin, subset and element numbers in that file (sourceIdentifier)"  # noqa
+                        }
+                    ]
+                    parameter['agent'] = None
+                    parameter['role'] = None
+                    parameter['process'] = None
+                    parameter['date'] = datetime.now().isoformat()
+                    parameter['comment'] = None
+                    parameter['status'] = None
+                    parameter['version'] = None
+                    parameter['reportType'] = None
+
+
                     wsi = self.get_wsi(guess_wsi)
-                    feature_id = f"WIGOS_{wsi}_{characteristic_date}T{characteristic_time}"  # noqa
-                    feature_id = f"{feature_id}{id}-{index}"
+                    tsi = self.get_tsi()
+                    if fileid != "":
+                        feature_id = f"{fileid}-{id}-{index}"
+                        report_id = f"{fileid}-{id}"
+                    else:
+                        feature_id = f"WIGOS_{wsi}_{characteristic_date}T{characteristic_time}"  # noqa
+                        report_id = f"WIGOS_{wsi}_{characteristic_date}T{characteristic_time}-{id}"  # noqa
+
+                    parameter['reportIdentifier'] = report_id
+                    parameter['stationIdentifier'] = tsi
+                    parameter['wigosStationIdentifier'] = wsi
+
                     phenomenon_time = self.get_time()
                     if "/" in phenomenon_time:
                         result_time = phenomenon_time.split("/")
                         result_time = result_time[1]
                     else:
                         result_time = phenomenon_time
-                    data[feature_id] = {
+
+                    singleton = {
                         "geojson": {
                             "id": feature_id,
                             "conformsTo": ["http://www.wmo.int/spec/om-profile-1/1.0/req/geojson"],  # noqa
-                            "reportId": f"WIGOS_{wsi}_{characteristic_date}T{characteristic_time}{id}",  # noqa
                             "type": "Feature",
                             "geometry": self.get_location(),
                             "properties": {
-                                # "identifier": feature_id,
-                                "wigos_station_identifier": wsi,
+                                "host": None,
+                                "observer": None,
+                                "observationType": None,
+                                "observedProperty": key,
+                                "observingProcedure": None,
                                 "phenomenonTime": phenomenon_time,
+                                "result": {
+                                    "value": value,
+                                    "uom": attributes["units"],
+                                    "codeList": None,
+                                    "description": description
+                                },
+                                "resultQuality": [],
                                 "resultTime": result_time,
-                                "name": key,
-                                "value": value,
-                                "units": attributes["units"],
-                                "description": description,
-                                "metadata": metadata,
-                                "index": index,
-                                "fxxyyy": fxxyyy
+                                "parameter": deepcopy(parameter),
+                                "featureOfInterest": [],
+                                "relatedObservations": []
                             }
                         },
                         "_meta": {
                             "data_date": self.get_time(),
                             "identifier": feature_id,
-                            "geometry": self.get_location(),
-                            "metadata_hash": metadata_hash
+                            "geometry": self.get_location()#,
+                            #"metadata_hash": metadata_hash
                         },
                         "_headers": deepcopy(headers)
                         }
+                    yield singleton
+
                 else:
                     pass
             last_key = key
@@ -811,18 +874,22 @@ class BUFRParser:
 
 
 def transform(data: bytes, serialize: bool = False,
-              guess_wsi: bool = False) -> Iterator[dict]:
+              guess_wsi: bool = False,
+              filename = "") -> Iterator[dict]:
     """
     Main transformation
 
     :param data: byte string of BUFR data
     :param serialize: whether to return as JSON string (default is False)
-    :param guess_wsi: whether to 'guess' WSI based on TSI and allocaiotn rules
+    :param guess_wsi: whether to 'guess' WSI based on TSI and allocation rules
+    :param filename: name of the input datafile, returned in output geojson
 
     :returns: `generator` of GeoJSON features
     """
 
     error = False
+
+    hash = hashlib.sha512(data).hexdigest()
 
     # FIXME: figure out how to pass a bytestring to ecCodes BUFR reader
     tmp = tempfile.NamedTemporaryFile()
@@ -854,7 +921,7 @@ def transform(data: bytes, serialize: bool = False,
             if not error:
                 nsubsets = codes_get(bufr_handle, "numberOfSubsets")
                 LOGGER.info(f"{nsubsets} subsets")
-                collections = dict()
+                feature = dict()
                 for idx in range(nsubsets):
                     LOGGER.debug(f"Extracting subset {idx}")
                     codes_set(bufr_handle, "extractSubset", idx+1)
@@ -864,28 +931,29 @@ def transform(data: bytes, serialize: bool = False,
                     LOGGER.debug("Unpacking")
                     codes_set(single_subset, "unpack", True)
 
-                    parser = BUFRParser()
+                    parser = BUFRParser(filename=filename)
                     # only include tag if more than 1 subset in file
-                    tag = ""
-                    if nsubsets > 1:
-                        tag = f"-{idx}"
+                    tag = f"{imsg}-{idx+1}"
                     try:
-                        data = parser.as_geojson(single_subset, id=tag,
+                        data = parser.as_geojson(single_subset,
+                                                 id=tag,
                                                  serialize=serialize,
-                                                 guess_wsi=guess_wsi)  # noqa
-
+                                                 guess_wsi=guess_wsi,
+                                                 fileid = hash)  # noqa
                     except Exception as e:
                         LOGGER.error("Error parsing BUFR to GeoJSON, no data written")  # noqa
                         LOGGER.error(e)
                         data = {}
-                    del parser
-                    collections = deepcopy(data)
 
-                    yield collections
+                    for feature in data:
+                        yield feature
+
+                    del parser
+
                     codes_release(single_subset)
             else:
-                collections = {}
-                yield collections
+                feature = {}
+                yield feature
 
             if not error:
                 codes_release(bufr_handle)
