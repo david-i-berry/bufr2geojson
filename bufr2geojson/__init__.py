@@ -232,6 +232,7 @@ class BUFRParser:
                 value = self.qualifiers[c][k]["value"]
                 units = self.qualifiers[c][k]["attributes"]["units"]
                 description = self.qualifiers[c][k]["description"]
+                code = self.qualifiers[c][k]["code"]
                 try:
                     description = strip2(description)
                 except AttributeError:
@@ -240,7 +241,8 @@ class BUFRParser:
                     "name": name,
                     "value": value,
                     "units": units,
-                    "description": description
+                    "description": description,
+                    "fxxyyy": code
                 }
                 result.append(q)
         return result
@@ -756,38 +758,27 @@ class BUFRParser:
                                        attributes, append)
                     continue
                 if value is not None:
-                    # self.get_identification()
                     metadata = self.get_qualifiers()
-                    #metadata_hash = hashlib.md5(json.dumps(metadata).encode("utf-8")).hexdigest()  # noqa
-                    #md = {
-                    #    "id": metadata_hash,
-                    #    "metadata": list()
-                    #}
-                    #for idx in range(len(metadata)):
-                    #    md["metadata"].append(metadata[idx])
-
-
-                    # agent
-                    # role
-                    # process
-                    # date
-                    # comment
-                    # derivedFrom
-                    # status
-                    # version
-                    # reportType
-                    # reportIdentifier
-
-
+                    if attributes["units"] == "CODE TABLE":
+                        codeList = f"http://codes.wmo.int/bufr4/codeflag/{fxxyyy[0]}-{fxxyyy[1:3]}-{fxxyyy[3:6]}"
+                    else:
+                        codeList = None
                     # we want to convert to a dict
                     parameter = {}
                     for item in metadata:
                         if item['name'] in parameter:
                             LOGGER.warning("Duplicate named parameter found")
+                        fxxyyy_ = item.get("fxxyyy")
+                        if fxxyyy_ is not None:
+                            if item['units'] == "CODE TABLE":
+                                fxxyyy_ = f"http://codes.wmo.int/bufr4/codeflag/{fxxyyy_[0]}-{fxxyyy_[1:3]}-{fxxyyy_[3:6]}/{item['value']}"
+                            else:
+                                fxxyyy_ = f"http://codes.wmo.int/bufr4/b/{fxxyyy_[1:3]}/{fxxyyy_[3:6]}"
                         parameter[item['name']] = {
                             "value": item["value"],
                             "units": item["units"],
                             "description": item["description"],
+                            "definition": fxxyyy_
                         }
 
                     parameter['derivedFrom'] = [
@@ -797,18 +788,23 @@ class BUFRParser:
                             "description": "Input BUFR file (source) and bulletin, subset and element numbers in that file (sourceIdentifier)"  # noqa
                         }
                     ]
-                    parameter['agent'] = None
-                    parameter['role'] = None
-                    parameter['process'] = None
+                    parameter['agent'] = 1
+                    parameter['role'] = 1
+                    parameter['process'] = 1
                     parameter['date'] = datetime.now().isoformat()
-                    parameter['comment'] = None
-                    parameter['status'] = None
-                    parameter['version'] = None
-                    parameter['reportType'] = None
+                    parameter['comment'] = "Conversion from BUFR to GeoJSON"
+                    parameter['status'] = 1
+                    parameter['version'] = 1
+                    parameter['reportType'] = f"{headers['dataCategory']}-{headers['internationalDataSubCategory']}"
 
-
-                    wsi = self.get_wsi(guess_wsi)
-                    tsi = self.get_tsi()
+                    identifiers = self.get_identification(guess_wsi)
+                    wsi = identifiers['wsi']
+                    if wsi is not None:
+                        host = f"https://oscar.wmo.int/surface/#/search/station/stationReportDetails/{wsi}"
+                    else:
+                        host = None
+                    tsi = identifiers['tsi']
+                    id_type = identifiers['type']
                     if fileid != "":
                         feature_id = f"{fileid}-{id}-{index}"
                         report_id = f"{fileid}-{id}"
@@ -817,7 +813,7 @@ class BUFRParser:
                         report_id = f"WIGOS_{wsi}_{characteristic_date}T{characteristic_time}-{id}"  # noqa
 
                     parameter['reportIdentifier'] = report_id
-                    parameter['stationIdentifier'] = tsi
+                    parameter['stationIdentifier'] = {'id': tsi, 'type': id_type}
                     parameter['wigosStationIdentifier'] = wsi
 
                     phenomenon_time = self.get_time()
@@ -834,7 +830,7 @@ class BUFRParser:
                             "type": "Feature",
                             "geometry": self.get_location(),
                             "properties": {
-                                "host": None,
+                                "host": host,
                                 "observer": None,
                                 "observationType": None,
                                 "observedProperty": key,
@@ -843,7 +839,7 @@ class BUFRParser:
                                 "result": {
                                     "value": value,
                                     "uom": attributes["units"],
-                                    "codeList": None,
+                                    "codeList": codeList,
                                     "description": description
                                 },
                                 "resultQuality": [],
@@ -889,7 +885,7 @@ def transform(data: bytes, serialize: bool = False,
 
     error = False
 
-    hash = hashlib.sha512(data).hexdigest()
+    hash = hashlib.md5(data).hexdigest()
 
     # FIXME: figure out how to pass a bytestring to ecCodes BUFR reader
     tmp = tempfile.NamedTemporaryFile()
