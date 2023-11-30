@@ -788,12 +788,12 @@ class BUFRParser:
                             "description": "Input BUFR file (source) and bulletin, subset and element numbers in that file (sourceIdentifier)"  # noqa
                         }
                     ]
-                    parameter['agent'] = 1
-                    parameter['role'] = 1
-                    parameter['process'] = 1
+                    parameter['agent'] = None
+                    parameter['role'] = None
+                    parameter['process'] = None
                     parameter['date'] = datetime.now().isoformat()
                     parameter['comment'] = "Conversion from BUFR to GeoJSON"
-                    parameter['status'] = 1
+                    parameter['status'] = None
                     parameter['version'] = 1
                     parameter['reportType'] = f"{headers['dataCategory']}-{headers['internationalDataSubCategory']}"
 
