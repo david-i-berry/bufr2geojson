@@ -1030,7 +1030,7 @@ class BUFRParser:
                                     }
                                 ],
                                 "parameter": {
-                                    "hasProvenence": None,
+                                    "hasProvenance": None,
                                     "status": None,
                                     "version": 0,
                                     "comment": None,
