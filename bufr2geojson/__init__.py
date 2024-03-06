@@ -80,6 +80,8 @@ PREFERRED_UNITS = {
 # list of BUFR attributes
 ATTRIBUTES = ['code', 'units', 'scale', 'reference', 'width']
 
+_ATTRIBUTES_ = {}
+
 # list of ecCodes keys for BUFR headers
 HEADERS = ["edition", "masterTableNumber", "bufrHeaderCentre",
            "bufrHeaderSubCentre", "updateSequenceNumber", "dataCategory",
@@ -106,8 +108,7 @@ ECMWF_HEADERS = ["rdb", "rdbType", "oldSubtype", "localYear", "localMonth",
 
 LOCATION_DESCRIPTORS = ["latitude", "latitude_increment",
                         "latitude_displacement", "longitude",
-                        "longitude_increment", "longitude_displacement",
-                        "height_of_station_ground_above_mean_sea_level"]
+                        "longitude_increment", "longitude_displacement"]
 
 TIME_DESCRIPTORS = ["year", "month", "day", "hour", "minute",
                     "second", "time_increment", "time_period"]
@@ -120,6 +121,43 @@ ID_DESCRIPTORS = ["block_number", "station_number",
                   "marine_observing_platform_identifier",
                   "wigos_identifier_series", "wigos_issuer_of_identifier",
                   "wigos_issue_number", "wigos_local_identifier_character"]
+
+WSI_DESCRIPTORS = ["wigos_identifier_series", "wigos_issuer_of_identifier",
+                  "wigos_issue_number", "wigos_local_identifier_character"]
+
+IDENTIFIERS_BY_TYPE = {
+    # 0 surface data (land)
+    "0": {
+        "0": ["block_number", "station_number"],
+        "1": ["block_number", "station_number"],
+        "2": ["block_number", "station_number"],
+        "3": ["ship_or_mobile_land_station_identifier"],
+        "4": ["ship_or_mobile_land_station_identifier"],
+        "5": ["ship_or_mobile_land_station_identifier"],
+        "default": ["block_number", "station_number"]
+    },
+
+    # 1 surface data (sea)
+    "1": {
+        "0": ["ship_or_mobile_land_station_identifier"],
+        "6": ["ship_or_mobile_land_station_identifier"],
+        "7": ["ship_or_mobile_land_station_identifier"],
+        "15": ["ship_or_mobile_land_station_identifier"],
+        "25": [                    ],
+        "ship": ["ship_or_mobile_land_station_identifier"],
+        "buoy_5digit": ["region_number", "wmo_region_sub_area", "buoy_or_platform_identifier"],
+        "buoy_7digit": ["stationary_buoy_platform_identifier_e_g_c_man_buoys"]
+        # 7 digit id, 5 digit id (region, subarea, buoy id)
+    },
+    # 2 vertical sounding (other than satellite)
+    "2": {
+        "default": ["block_number", "station_number"]
+    },
+    # 31 oceanographic
+    "31": {
+        "default": ""
+    }
+}
 
 # dictionary to store jsonpath parsers, these are compiled the first time that
 # they are used.
@@ -143,7 +181,9 @@ class BUFRParser:
             "07": {},  # location (vertical)
             "08": {},  # significance qualifiers
             "09": {},  # reserved
-            "22": {}  # some sst sensors in class 22
+            "22": {},  # some sst sensors in class 22
+            "25": {},  # Processing information
+            "35": {}   # Data monitoring information
         }
 
     def set_qualifier(self, fxxyyy: str, key: str, value: Union[NUMBERS],
@@ -165,6 +205,7 @@ class BUFRParser:
 
         # get class of descriptor
         xx = fxxyyy[1:3]
+        LOGGER.debug(f"{fxxyyy},{key},{value},{description}")
         # first check whether the value is None, if so remove and exit
         if [value, description] == [None, None]:
             if key in self.qualifiers[xx]:
@@ -207,6 +248,43 @@ class BUFRParser:
 
         return value
 
+    def get_zcoordinate(self):
+        # class 07 gives vertical coordinate
+        result = list()
+
+
+        # 1) Height of sensor above local ground + height of station AMSL
+        # 2) Height of barometer AMSL
+        # 3) Height or altitude
+        # 4) Geopotential
+        # 5) Pressure
+        # 6) Height above station + height of station AMSL
+        # 7) Height
+        # 8) Geopotential height
+        # 9)
+
+        c = '07'
+        for k in self.qualifiers[c]:
+            name = k
+            value = self.qualifiers[c][k]["value"]
+            units = self.qualifiers[c][k]["attributes"]["units"]
+            description = self.qualifiers[c][k]["description"]
+            try:
+                description = strip2(description)
+            except AttributeError:
+                pass
+
+            q = {
+                "name": name,
+                "value": value,
+                "units": units,
+                "description": description
+            }
+            result.append(q)
+
+        return result
+
+
     def get_qualifiers(self) -> list:
         """
         Function to return all qualifiers set (excluding special qualifiers
@@ -215,8 +293,24 @@ class BUFRParser:
         :returns: List containing qualifiers, their values and units
         """
 
-        classes = ("01", "02", "03", "04", "05", "06", "07", "08", "22")
-        result = list()
+        classes = ("01", "02", "03", "04", "05", "06",
+                   "07", "08", "22", "25", "35")
+
+
+        # 01: identification
+        # 02, 03: station and sensor metadata
+        # 04, 05, 06, 07: location
+        # 08: significance qualifiers
+        # 09: reserved
+        # 25: processing
+        # 35: monitoring
+
+        identification = {}
+        wigos_md = {}
+        qualifiers = {}
+        processing = {}
+        monitoring = {}
+
         # name, value, units
         for c in classes:
             for k in self.qualifiers[c]:
@@ -225,8 +319,10 @@ class BUFRParser:
                     continue
                 if k in TIME_DESCRIPTORS:
                     continue
-                if k in ID_DESCRIPTORS:
+                if k in WSI_DESCRIPTORS:
                     continue
+                if c in ("04", "05", "06", "07"):
+                    LOGGER.warning(f"Unhandled location information {k}")
                 # now remaining qualifiers
                 name = k
                 value = self.qualifiers[c][k]["value"]
@@ -236,6 +332,55 @@ class BUFRParser:
                     description = strip2(description)
                 except AttributeError:
                     pass
+
+                if units in ("CODE TABLE", "FLAG TABLE"):
+                    q = {
+                        "value": value.copy()
+                    }
+                elif units == "CCITT IA5":
+                    q = {"value": description}
+                else:
+                    q = {
+                        "value": value,
+                        "units": units,
+                        "description": description
+                    }
+
+                if c == "01":
+                    identification[k] = q.copy()
+                if c in ("02", "03", "22"):
+                    wigos_md[k] = q.copy()
+                if c in ("08", "09"):
+                    qualifiers[k] = q.copy()
+                if c == "25":
+                    processing[k] = q.copy()
+                if c == "35":
+                    monitoring[k] = q.copy()
+
+        result = {
+            "identification": identification,
+            "wigos_md": wigos_md,
+            "qualifiers": qualifiers,
+            "processing": processing,
+            "monitoring": monitoring
+        }
+
+        return result
+
+    def get_instrumentation(self) -> Union[dict,None]:
+        classes = ("02", "03", "22")
+        result = list()
+        for c in classes:
+            for k in self.qualifiers[c]:
+                name = k
+                value = self.qualifiers[c][k]["value"]
+                units = self.qualifiers[c][k]["attributes"]["units"]
+                description = self.qualifiers[c][k]["description"]
+                try:
+                    description = strip2(description)
+                except AttributeError:
+                    pass
+
                 q = {
                     "name": name,
                     "value": value,
@@ -263,12 +408,13 @@ class BUFRParser:
             LOGGER.warning("latitude set to None")
             latitude = None
         else:
-            latitude = deepcopy(self.qualifiers["05"]["latitude"])
+            latitude = self.qualifiers["05"]["latitude"]
 
         if latitude is not None:
             # check if we need to add a displacement
             if "latitude_displacement" in self.qualifiers["05"]:  # noqa
-                y_displacement = deepcopy(self.qualifiers["05"]["latitude_displacement"])  # noqa
+                latitude = latitude.copy()
+                y_displacement = self.qualifiers["05"]["latitude_displacement"]  # noqa
                 latitude["value"] += y_displacement["value"]
             latitude = round(latitude["value"],
                              latitude["attributes"]["scale"])
@@ -280,23 +426,28 @@ class BUFRParser:
             LOGGER.warning("longitude set to None")
             longitude = None
         else:
-            longitude = deepcopy(self.qualifiers["06"]["longitude"])
+            longitude = (self.qualifiers["06"]["longitude"])
 
         if longitude is not None:
             # check if we need to add a displacement
             if "longitude_displacement" in self.qualifiers["06"]:
-                x_displacement = deepcopy(self.qualifiers["06"]["longitude_displacement"])  # noqa
+                longitude = longitude.copy()
+                x_displacement = self.qualifiers["06"]["longitude_displacement"]  # noqa
                 longitude["value"] += x_displacement["value"]
             # round to avoid extraneous digits
             longitude = round(longitude["value"], longitude["attributes"]["scale"])  # noqa
 
+
+        # The following removed as this does not give th z coordinate for the observation
         # now station elevation
-        if "height_of_station_ground_above_mean_sea_level" in self.qualifiers["07"]:  # noqa
-            elevation = deepcopy(self.qualifiers["07"]["height_of_station_ground_above_mean_sea_level"])  # noqa
-            elevation = round(elevation["value"], elevation["attributes"]["scale"])  # noqa
-        else:
-            elevation = None
+        # if "height_of_station_ground_above_mean_sea_level" in self.qualifiers["07"]:  # noqa
+        #     elevation = self.qualifiers["07"]["height_of_station_ground_above_mean_sea_level"]  # noqa
+        #     elevation = elevation.copy()
+        #     elevation = round(elevation["value"], elevation["attributes"]["scale"])  # noqa
+        # else:
+        #    elevation = None
         # no elevation displacement in BUFR
+
 
         # check for increments, not yet implemented
         if "005011" in self.qualifiers["05"] or \
@@ -307,8 +458,9 @@ class BUFRParser:
 
         location = [longitude, latitude]
 
-        if elevation is not None:
-            location.append(elevation)
+
+        # if elevation is not None:
+        #    location.append(elevation)
 
         if None in location:
             LOGGER.debug('geometry contains null values; setting to None')
@@ -388,13 +540,19 @@ class BUFRParser:
                 # they should indicate two. For example, average wind speed
                 # over proceeding 10 minutes. If only negative single
                 # displacement assume time period up to current time.
+                #
+                # NOTE: this is not the case for radiosonde data. BUFR
+                # is inconsistent and a collection of formats.
                 if value < 0:
                     value = [value, 0]
                 else:
-                    value = [0, value]
+                    # value = [0, value]
+                    value = [value]
+
             time_list = [None] * len(value)
+
             for tidx in range(len(value)):
-                time_list[tidx] = deepcopy(time_)
+                time_list[tidx] = time_
                 if units not in ("years", "months"):
                     kwargs = dict()
                     kwargs[units] = value[tidx]
@@ -403,6 +561,10 @@ class BUFRParser:
                     time_list[tidx].year += value[tidx]
                 elif units == "months":
                     time_list[tidx].month += value[tidx]
+
+            if len(time_list) == 1:
+                time_ = time_list[0]
+                time_list = None
 
         if time_list:
             if len(time_list) > 2:
@@ -644,7 +806,6 @@ class BUFRParser:
                 headers[header] = codes_get(bufr_handle, header)
             except Exception as e:
                 if header == "subsetNumber":
-                    LOGGER.warning("subsetNumber not found, continuing")
                     continue
                 LOGGER.error(f"Error reading {header}")
                 raise e
@@ -654,11 +815,11 @@ class BUFRParser:
 
         try:
             sequence = codes_get_array(bufr_handle, UNEXPANDED_DESCRIPTORS[0])
+            sequence = sequence.tolist()
         except Exception as e:
             LOGGER.error(f"Error reading {UNEXPANDED_DESCRIPTORS}")
             raise e
-
-        sequence = sequence.tolist()
+        # convert to string
         sequence = [f"{descriptor}" for descriptor in sequence]
         sequence = ",".join(sequence)
         headers["sequence"] = sequence
@@ -668,7 +829,6 @@ class BUFRParser:
         key_iterator = codes_bufr_keys_iterator_new(bufr_handle)
 
         # set up data structures
-        data = {}
         last_key = None
         index = 0
 
@@ -678,25 +838,32 @@ class BUFRParser:
             key = codes_bufr_keys_iterator_get_name(key_iterator)
             # identify what we are processing
             if key in (HEADERS + ECMWF_HEADERS + UNEXPANDED_DESCRIPTORS):
-                continue
+                continue  # header field, we have already processed these
             else:  # data descriptor
                 try:
+                    # This appears to be costly, but it's not clear that
+                    # we can avoid this. The key name (stripped of # index)
+                    # is not unique and the value of fxxyyy depends on the
+                    # position in the sequence.
                     fxxyyy = codes_get(bufr_handle, f"{key}->code")
                 except Exception as e:
                     LOGGER.warning(f"Error reading {key}->code, skipping element: {e}")  # noqa
                     continue
 
-            # get class
+            # get class etc
+            f = int(fxxyyy[0:1])
             xx = int(fxxyyy[1:3])
+            yyy = int(fxxyyy[3:6])
             # get value and attributes
             # get as array and convert to scalar if required
             value = codes_get_array(bufr_handle, key)
+            _value = None
             if (len(value) == 1) and (not isinstance(value, str)):
                 value = value[0]
                 if value in (CODES_MISSING_DOUBLE, CODES_MISSING_LONG):
                     value = None
-                # now convert to regular python types as json.dumps doesn't
-                # like numpy
+                # now convert to regular python types as json.dumps
+                #  (used later) doesn't like numpy
                 if isinstance(value, np.float64):
                     value = float(value)
                 elif isinstance(value, np.int64):
@@ -706,107 +873,200 @@ class BUFRParser:
 
             # get attributes
             attributes = {}
-            for attribute in ATTRIBUTES:
-                attribute_key = f"{key}->{attribute}"
-                try:
-                    attribute_value = codes_get(bufr_handle, attribute_key)
-                except Exception as e:
-                    LOGGER.warning(f"Error reading {attribute_key}: {e}")
-                    attribute_value = None
-                if attribute_value is not None:
-                    attributes[attribute] = attribute_value
+            if fxxyyy in _ATTRIBUTES_:
+                attributes = _ATTRIBUTES_[fxxyyy]
+                attributes = attributes.copy()
+            else:
+                for attribute in ATTRIBUTES:
+                    attribute_key = f"{key}->{attribute}"
+                    try:
+                        attribute_value = codes_get(bufr_handle, attribute_key)
+                    except Exception as e:
+                        LOGGER.warning(f"Error reading {attribute_key}: {e}, set to missing")  # noqa
+                        attribute_value = None
+                    if attribute_value is not None:
+                        attributes[attribute] = attribute_value
+                _ATTRIBUTES_[fxxyyy] = attributes.copy()
 
             units = attributes["units"]
+
             # next decoded value if from code table
             description = None
-            if attributes["units"] == "CODE TABLE":
+            observation_type = "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement"  # default type
+            if (attributes["units"] == "CODE TABLE") and (value is not None):
                 description = self.get_code_value(attributes["code"], value)
+                observation_type = "http//www.opengis.net/def/observationType/OGC-OM/2.0/OM_CategoryObservation"
+                _value = {
+                    'codetable': f"http://codes.wmo.int/bufr4/codeflag/{f:1}-{xx:02}-{yyy:03}",  # noqa
+                    'entry': f"{value}",  # noqa
+                    'description': description
+                }
+            elif (attributes["units"] == "FLAG TABLE") and (value is not None):
+                nbits = attributes['width']
+                _value = {
+                    'flags': f"http://codes.wmo.int/bufr4/codeflag/{f:1}-{xx:02}-{yyy:03}",  # noqa
+                    'entry': "{0:0{1}b}".format(value, nbits)
+                }
             elif attributes["units"] == "CCITT IA5":
                 description = value
                 value = None
+                observation_type = "http//www.opengis.net/def/observationType/OGC-OM/2.0/OM_Observation"
             if (units in PREFERRED_UNITS) and (value is not None):
                 value = Units.conform(value, Units(units),
                                       Units(PREFERRED_UNITS[units]))
                 # round to 6 d.p. to remove any erroneous digits
                 # due to IEEE arithmetic
+                # ToDo change to use use scale factor to determine number
+                # of decimal places.
                 value = round(value, 6)
                 units = PREFERRED_UNITS[units]
                 attributes["units"] = units
-            # now process
-            # first process key to something more sensible
+            if _value is not None:
+                value = _value.copy()
+            # Now process, convert key to snake case
             key = re.sub("#[0-9]+#", "", key)
             key = re.sub("([a-z])([A-Z])", r"\1_\2", key)
             key = key.lower()
+
+            # determine whether we have data or metadata
             append = False
-            if xx < 9:
+            if xx < 9:  # significance qualifier (metadata)
                 if ((xx >= 4) and (xx < 8)) and (key == last_key):
                     append = True
                 self.set_qualifier(fxxyyy, key, value, description,
                                    attributes, append)
-            elif xx == 31:
+            elif xx == 31:  # replication factor
                 pass
-            else:
-                if fxxyyy == "022067":
+            elif xx in (25,35):  #  noqa processing information and data monitoring information respectively
+                self.set_qualifier(fxxyyy, key, value, description,
+                                   attributes, append)
+            else:  # data
+                if fxxyyy in ("022067"):  # noqa instrument type for water temperature, qualifier?
                     append = False
                     self.set_qualifier(fxxyyy, key, value, description,
                                        attributes, append)
                     continue
-                if value is not None:
-                    # self.get_identification()
+                # if value is not None:  # now we have data
+                if (value is not None) or (description is not None):
+                    # if _value is not None:
+                    #    value = _value
                     metadata = self.get_qualifiers()
-                    metadata_hash = hashlib.md5(json.dumps(metadata).encode("utf-8")).hexdigest()  # noqa
-                    md = {
-                        "id": metadata_hash,
-                        "metadata": list()
-                    }
-                    for idx in range(len(metadata)):
-                        md["metadata"].append(metadata[idx])
+                    # add description
+                    metadata["fxxyyy"] = fxxyyy
+                    metadata["provenance"] = headers.copy()
+
+                    # remove the following ...?
+                    #metadata_hash = hashlib.md5(json.dumps(metadata).encode("utf-8")).hexdigest()  # noqa
+
+                    #md = {
+                    #    "id": metadata_hash,
+                    #    "metadata": list()
+                    #}
+                    #for idx in range(len(metadata)):
+                    #    md["metadata"].append(metadata[idx])
+                    # end remove ...
+
+
+                    # get type of station, used to set procedure
+                    station_type = self.get_qualifier("02","station_type",None)
+                    observing_procedure = "http://codes.wmo.int/wmdr/SourceOfObservation/unknown"  # noqa
+                    # station type manned / hybrid does not provide
+                    # information on whether a sensor is manually read or
+                    # automatically. Data from OSCAR/Surface is required
+                    # for this. Only set auto for fully auto stations.
+                    if station_type == 0:
+                        observing_procedure = f"http://codes.wmo.int/bufr4/codeflag/0-02-001/{station_type}"
+
+                    # get station identifier
                     wsi = self.get_wsi(guess_wsi)
-                    feature_id = f"WIGOS_{wsi}_{characteristic_date}T{characteristic_time}"  # noqa
+                    host_id = wsi
+                    # if wsi is None set to UNKNOWN
+                    if wsi is None:
+                        wsi = "UNKNOWN"  #
+                        host_id = self.get_tsi()
+
+                    # create an identifier for this observation (feature in geosjon)
+                    feature_id = f"{host_id}_{characteristic_date}T{characteristic_time}"  # noqa
                     feature_id = f"{feature_id}{id}-{index}"
+
+                    # get phenomenon time
                     phenomenon_time = self.get_time()
+
+                    # get result time
                     if "/" in phenomenon_time:
                         result_time = phenomenon_time.split("/")
                         result_time = result_time[1]
                     else:
                         result_time = phenomenon_time
-                    data[feature_id] = {
+
+                    # now create geojson object
+                    data = {
                         "geojson": {
                             "id": feature_id,
-                            "conformsTo": ["http://www.wmo.int/spec/om-profile-1/1.0/req/geojson"],  # noqa
-                            "reportId": f"WIGOS_{wsi}_{characteristic_date}T{characteristic_time}{id}",  # noqa
+                            "conformsTo": ["http://wis.wmo.int/spec/wccdm-obs/1/req/core/json"],  # noqa
+                            # "reportId": f"WIGOS_{wsi}_{characteristic_date}T{characteristic_time}{id}",  # noqa
                             "type": "Feature",
                             "geometry": self.get_location(),
+                            "zCoordinate": self.get_zcoordinate(),
                             "properties": {
-                                # "identifier": feature_id,
-                                "wigos_station_identifier": wsi,
+                                "host": host_id,  # noqa
+                                "observer": None,
+                                "observationType": observation_type,  # noqa
+                                "observedProperty": key,
+                                "observingProcedure": observing_procedure,
                                 "phenomenonTime": phenomenon_time,
                                 "resultTime": result_time,
-                                "name": key,
-                                "value": value,
-                                "units": attributes["units"],
-                                "description": description,
-                                "metadata": metadata,
+                                "validTime": None,
+                                "result": {
+                                    "value": value,
+                                    "units": attributes["units"],
+                                    "standardUncertainty": None
+                                },
+                                "resultQuality": [
+                                    {
+                                        "inScheme": None,
+                                        "flag": None,
+                                        "flagValue": None
+                                    }
+                                ],
+                                "parameter": {
+                                    "hasProvenence": None,
+                                    "status": None,
+                                    "version": 0,
+                                    "comment": None,
+                                    "reportType": f"{headers['dataCategory']:03}{headers['internationalDataSubCategory']:03}",  # noqa
+                                    "reportIdentifier": f"{host_id}_{characteristic_date}T{characteristic_time}{id}",  # noqa
+                                    "isMemberOf": None,
+                                    "additionalProperties": metadata.copy()
+                                },
+                                "featureOfInterest":[
+                                    {
+                                        "id": None,
+                                        "label": None,
+                                        "relation": None
+                                    }
+                                ],
                                 "index": index,
-                                "fxxyyy": fxxyyy
                             }
                         },
                         "_meta": {
                             "data_date": self.get_time(),
                             "identifier": feature_id,
-                            "geometry": self.get_location(),
-                            "metadata_hash": metadata_hash
+                            "geometry": self.get_location()#,
+                            #"metadata_hash": metadata_hash
                         },
-                        "_headers": deepcopy(headers)
+                        "_headers": headers.copy()
                         }
+                    yield data
+                    # now yield
                 else:
                     pass
             last_key = key
             index += 1
         codes_bufr_keys_iterator_delete(key_iterator)
-        if serialize:
-            data = json.dumps(data, indent=4)
-        return data
+        #if serialize:
+        #    data = json.dumps(data, indent=4)
+        #return data
 
 
 def transform(data: bytes, serialize: bool = False,
@@ -877,10 +1137,12 @@ def transform(data: bytes, serialize: bool = False,
                         LOGGER.error("Error parsing BUFR to GeoJSON, no data written")  # noqa
                         LOGGER.error(e)
                         data = {}
-                    del parser
-                    collections = deepcopy(data)
 
-                    yield collections
+                    # data is now an iterator
+                    for obs in data:
+                        yield obs
+
+                    del parser
                     codes_release(single_subset)
             else:
                 collections = {}
@@ -915,7 +1177,7 @@ def strip2(value) -> str:
         space = ' '
         value = f"{value}"
 
-    if value.startswith(space) or value.endswith(space):
-        LOGGER.warning(f"value '{value}' is space padded; upstream data should be fixed")  # noqa
+    #if value.startswith(space) or value.endswith(space):
+    #    LOGGER.debug(f"value '{value}' is space padded; upstream data should be fixed")  # noqa
 
     return value.strip()

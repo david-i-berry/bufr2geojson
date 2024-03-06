@@ -73,11 +73,14 @@ def transform(ctx, bufr_file, output_dir, verbosity):
     result = as_geojson(bufr_file.read())
     for collection in result:
         for key, item in collection.items():
-            outfile = f"{output_dir}{os.sep}{key}.json"
-            data = item['geojson']
-            with open(outfile, "w") as fh:
-                fh.write(json.dumps(data, indent=4))
-
+            if key == "geojson":
+                identifier = item['id']
+                outfile = f"{output_dir}{os.sep}{identifier}.json"
+                with open(outfile, "w") as fh:
+                    fh.write(json.dumps(item, indent=4))
+            else:
+                click.echo(key)
+                click.echo(json.dumps(item))
     click.echo("Done")
 
 
