@@ -503,8 +503,13 @@ class BUFRParser:
         else:
             offset = 0
         time_ = f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"  # noqa
-        time_ = datetime.strptime(time_, "%Y-%m-%d %H:%M:%S")
-        time_ = time_ + timedelta(days=offset)
+        try:
+            time_ = datetime.strptime(time_, "%Y-%m-%d %H:%M:%S")
+            time_ = time_ + timedelta(days=offset)
+        except Exeption as e:
+            LOGGER.error(e)
+            LOGGER.debug(time_)
+            raise e
         time_list = None
 
         # check if we have any increment descriptors, not yet supported
@@ -990,7 +995,11 @@ class BUFRParser:
                     feature_id = f"{feature_id}{id}-{index}"
 
                     # get phenomenon time
-                    phenomenon_time = self.get_time()
+                    try:
+                        phenomenon_time = self.get_time()
+                    except Exception as e:
+                        LOGGER.debug("Error getting phenomenon time, skipping")
+                        continue
 
                     # get result time
                     if "/" in phenomenon_time:
