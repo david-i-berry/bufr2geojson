@@ -321,8 +321,8 @@ class BUFRParser:
                     continue
                 if k in WSI_DESCRIPTORS:
                     continue
-                if c in ("04", "05", "06", "07"):
-                    LOGGER.warning(f"Unhandled location information {k}")
+#                if c in ("04", "05", "06", "07"):
+#                    LOGGER.warning(f"Unhandled location information {k}")
                 # now remaining qualifiers
                 name = k
                 value = self.qualifiers[c][k]["value"]
