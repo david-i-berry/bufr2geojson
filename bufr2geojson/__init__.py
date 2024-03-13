@@ -183,6 +183,7 @@ class BUFRParser:
             "09": {},  # reserved
             "22": {},  # some sst sensors in class 22
             "25": {},  # Processing information
+            "33": {},  # BUFR/CREX Quality information
             "35": {}   # Data monitoring information
         }
 
@@ -907,6 +908,7 @@ class BUFRParser:
                     'description': description
                 }
             elif (attributes["units"] == "FLAG TABLE") and (value is not None):
+                observation_type = "http//www.opengis.net/def/observationType/OGC-OM/2.0/OM_CategoryObservation"
                 nbits = attributes['width']
                 _value = {
                     'flags': f"http://codes.wmo.int/bufr4/codeflag/{f:1}-{xx:02}-{yyy:03}",  # noqa
@@ -942,7 +944,7 @@ class BUFRParser:
                                    attributes, append)
             elif xx == 31:  # replication factor
                 pass
-            elif xx in (25,35):  #  noqa processing information and data monitoring information respectively
+            elif xx in (25,33,35):  #  noqa processing information, quality information and data monitoring information respectively
                 self.set_qualifier(fxxyyy, key, value, description,
                                    attributes, append)
             else:  # data
