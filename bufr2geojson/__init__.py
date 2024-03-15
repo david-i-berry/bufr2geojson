@@ -948,7 +948,9 @@ class BUFRParser:
                 self.set_qualifier(fxxyyy, key, value, description,
                                    attributes, append)
             else:  # data
-                if fxxyyy in ("022067"):  # noqa instrument type for water temperature, qualifier?
+                if fxxyyy in ("022067", "022055", "022056", "022060",
+                              "022068", "022080", "022081", "022078",
+                              "022094", "022096"):  # noqa instrument type for water temperature, qualifier?
                     append = False
                     self.set_qualifier(fxxyyy, key, value, description,
                                        attributes, append)
