@@ -21,6 +21,7 @@
 
 __version__ = "0.7.0"
 
+import base64
 from collections import OrderedDict
 from copy import deepcopy
 import csv
@@ -1173,11 +1174,14 @@ class BUFRParser:
                 yield data
                 last_key = key
                 index += 1
+            else:
+                last_key = key
         codes_bufr_keys_iterator_delete(key_iterator)
 
 
 def transform(data: bytes, guess_wsi: bool = False,
-              source_identifier: str = "") -> Iterator[dict]:
+              source_identifier: str = "",
+              return_bufr: bool = False) -> Iterator[dict]:
     """
     Main transformation
 
@@ -1234,9 +1238,13 @@ def transform(data: bytes, guess_wsi: bool = False,
                     with BytesIO() as bufr_bytes:
                         codes_write(single_subset, bufr_bytes)
                         bufr_bytes.seek(0)
+                        binary_data = bufr_bytes.getvalue()
                         bhash = hashlib.md5()
-                        bhash.update(bufr_bytes.getvalue())
+                        bhash.update(binary_data)
                         reportIdentifier = bhash.hexdigest()
+
+                    if return_bufr:
+                        bufr_b64 = base64.b64encode(binary_data).decode('utf-8')
 
                     LOGGER.debug("Unpacking")
                     codes_set(single_subset, "unpack", True)
@@ -1292,6 +1300,8 @@ def transform(data: bytes, guess_wsi: bool = False,
                             }
                         }
                         obs['geojson']['properties']['parameter']['hasProvenance'] = prov.copy()  # noqa
+                        if return_bufr:
+                            obs['geojson']['properties']['parameter']['additionalProperties']['bufr'] = bufr_b64
                         yield obs
 
                     del parser
