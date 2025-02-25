@@ -167,7 +167,7 @@ IDENTIFIERS_BY_TYPE = {
         "6": ["ship_or_mobile_land_station_identifier"],
         "7": ["ship_or_mobile_land_station_identifier"],
         "15": ["ship_or_mobile_land_station_identifier"],
-        "25": [],
+        "25": ["wmo_marine_observing_platform_extended_identifier"],
         "ship": ["ship_or_mobile_land_station_identifier"],
         "buoy_5digit": ["region_number", "wmo_region_sub_area", "buoy_or_platform_identifier"],  # noqa
         "buoy_7digit": ["stationary_buoy_platform_identifier_e_g_c_man_buoys"]
