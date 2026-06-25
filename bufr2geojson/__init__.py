@@ -167,7 +167,7 @@ IDENTIFIERS_BY_TYPE = {
         "6": ["ship_or_mobile_land_station_identifier"],
         "7": ["ship_or_mobile_land_station_identifier"],
         "15": ["ship_or_mobile_land_station_identifier"],
-        "25": ["wmo_marine_observing_platform_extended_identifier"],
+        "25": [],
         "ship": ["ship_or_mobile_land_station_identifier"],
         "buoy_5digit": ["region_number", "wmo_region_sub_area", "buoy_or_platform_identifier"],  # noqa
         "buoy_7digit": ["stationary_buoy_platform_identifier_e_g_c_man_buoys"]
@@ -485,8 +485,14 @@ class BUFRParser:
 
         if len(rel_height) == 1 and station_ground is not None:
             assert station_ground.get('attributes').get('units') == self.qualifiers["07"].get(rel_height[0]).get('attributes').get('units')  # noqa
-            z_amsl = station_ground.get('value') + self.qualifiers["07"].get(rel_height[0], {}).get('value')  # noqa
-            z_alg = self.qualifiers["07"].get(rel_height[0], {}).get('value')
+            try:
+                temp = self.qualifiers["07"]
+                z_amsl = station_ground.get('value') + temp.get(rel_height[0], {}).get('value')  # noqa
+                z_alg = temp.get(rel_height[0], {}).get('value')
+            except Exception as error:
+                msg = f"Error raised while extracting z coordinate: {error}"
+                LOGGER.error(msg)
+                raise RuntimeError(msg)
             if 'depth' in rel_height[0]:
                 z_alg = -1 * z_alg
         elif len(abs_height) == 1 and station_ground is not None:
