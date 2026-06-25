@@ -727,9 +727,9 @@ class BUFRParser:
         _types = ("region_number", "wmo_region_sub_area",
                   "buoy_or_platform_identifier")
         if all(x in self.qualifiers["01"] for x in _types):
-            wmo_region = self.get_qualifier("region_number")
-            wmo_subregion = self.get_qualifier("wmo_region_sub_area")
-            wmo_number = self.get_qualifier("buoy_or_platform_identifier")
+            wmo_region = self.get_qualifier("01","region_number")
+            wmo_subregion = self.get_qualifier("01","wmo_region_sub_area")
+            wmo_number = self.get_qualifier("01","buoy_or_platform_identifier")
             tsi = strip2(f"{wmo_region:01d}{wmo_subregion:01d}{wmo_number:05d}")  # noqa
             if guess_wsi:
                 wsi_series = 0
@@ -763,24 +763,16 @@ class BUFRParser:
                 "type": _type
             }
 
-        # 7 digit buoy number
-        # 001087
-        _type = "7_digit_marine_observing_platform_identifier"
+        _type = "marine_observing_platform_identifier"
         if _type in self.qualifiers["01"]:
-            id_ = self.get_qualifier("01", _type)
-            tsi = strip2(id_)
+            qualifier = self.qualifiers["01"][_type]
+            id_ = qualifier["value"]
+            code = qualifier["code"]  # e.g. "001005" or "001087"
+            width = 5 if code == "001005" else 7
+            tsi = str(int(id_)).zfill(width)
             if guess_wsi:
-                wsi_series = 0
-                wsi_issuer = 20002
-                wsi_number = 0
-                wsi_local = tsi
-                wsi = f"{wsi_series}-{wsi_issuer}-{wsi_number}-{wsi_local}"
-
-            return {
-                "wsi": wsi,
-                "tsi": tsi,
-                "type": _type
-            }
+                wsi = f"0-20002-0-{tsi}"
+            return {"wsi": wsi, "tsi": tsi, "type": _type}
 
         # flag if we do not have WSI
         LOGGER.debug(self.qualifiers["01"])
