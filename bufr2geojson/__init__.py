@@ -709,18 +709,18 @@ class BUFRParser:
         if _type in self.qualifiers["01"]:
             callsign = self.get_qualifier("01", _type)
             tsi = strip2(callsign)
-            if guess_wsi:
-                wsi_series = 0
-                wsi_issuer = 20004
-                wsi_number = 0
-                wsi_local = tsi
-                wsi = f"{wsi_series}-{wsi_issuer}-{wsi_number}-{wsi_local}"
-
-            return {
-                "wsi": wsi,
-                "tsi": tsi,
-                "type": _type
-            }
+            if tsi:
+                if guess_wsi:
+                    wsi_series = 0
+                    wsi_issuer = 20004
+                    wsi_number = 0
+                    wsi_local = tsi
+                    wsi = f"{wsi_series}-{wsi_issuer}-{wsi_number}-{wsi_local}"
+                return {
+                    "wsi": wsi,
+                    "tsi": tsi,
+                    "type": _type
+                }
 
         # 5 digit buoy number
         # 001003, 001020, 001005
