@@ -732,8 +732,11 @@ class BUFRParser:
             wmo_number = self.get_qualifier("01","buoy_or_platform_identifier")
             tsi = strip2(f"{wmo_region:01d}{wmo_subregion:01d}{wmo_number:05d}")  # noqa
             if guess_wsi:
+                if (not wmo_region) or (not wmo_subregion):
+                    wsi_issuer = 65534
+                else:
+                    wsi_issuer = 20002
                 wsi_series = 0
-                wsi_issuer = 20002
                 wsi_number = 0
                 wsi_local = tsi  # noqa
                 wsi = f"{wsi_series}-{wsi_issuer}-{wsi_number}-{wsi_local}"
