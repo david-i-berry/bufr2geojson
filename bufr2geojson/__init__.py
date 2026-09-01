@@ -655,6 +655,29 @@ class BUFRParser:
 
         return self.get_identification()["tsi"]
 
+    @staticmethod
+    def _qualifier_as_int(value):
+        """Coerce a get_qualifier() result to a plain int.
+
+        get_qualifier() returns the raw numeric value for most qualifiers,
+        but for CODE TABLE / FLAG TABLE typed elements (e.g. 001003 region
+        number, 001020 WMO region sub-area) it instead returns the coded
+        dict shape ({'codetable'|'flagtable', 'entry', 'description'} --
+        same shape produced for an observation's result.value, see the
+        CODE TABLE/FLAG TABLE branch above) rather than a number. Identifier
+        construction below needs the plain integer entry, not the dict --
+        confirmed against real buoy/platform BUFR messages where
+        region_number (001003) comes back wrapped like this and crashed
+        the ":01d" format spec with "unsupported format string passed to
+        dict.__format__".
+        """
+        if isinstance(value, dict):
+            entry = value.get("entry")
+            if entry in (None, ""):
+                return None
+            return int(entry, 2) if "flagtable" in value else int(entry)
+        return value
+
     def get_identification(self, guess_wsi: bool = False) -> dict:
         """
         Function extracts identification information from qualifiers.
@@ -727,9 +750,9 @@ class BUFRParser:
         _types = ("region_number", "wmo_region_sub_area",
                   "buoy_or_platform_identifier")
         if all(x in self.qualifiers["01"] for x in _types):
-            wmo_region = self.get_qualifier("01","region_number")
-            wmo_subregion = self.get_qualifier("01","wmo_region_sub_area")
-            wmo_number = self.get_qualifier("01","buoy_or_platform_identifier")
+            wmo_region = self._qualifier_as_int(self.get_qualifier("01","region_number"))  # noqa
+            wmo_subregion = self._qualifier_as_int(self.get_qualifier("01","wmo_region_sub_area"))  # noqa
+            wmo_number = self._qualifier_as_int(self.get_qualifier("01","buoy_or_platform_identifier"))  # noqa
             tsi = strip2(f"{wmo_region:01d}{wmo_subregion:01d}{wmo_number:05d}")  # noqa
             if guess_wsi:
                 if (not wmo_region) or (not wmo_subregion):
